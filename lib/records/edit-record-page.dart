@@ -69,6 +69,7 @@ class EditRecordPageState extends State<EditRecordPage> {
   final _logger = Logger.withContext('EditRecordPage');
   DatabaseInterface database = ServiceConfig.database;
   TextEditingController _textEditingController = TextEditingController();
+  TextEditingController _repeatEditingController = TextEditingController();
   late final AmountExpressionResolver _amountExpressionResolver;
   final _receivedAmountController = TextEditingController();
   bool _receivedAmountIsManual = false;
@@ -294,12 +295,118 @@ class EditRecordPageState extends State<EditRecordPage> {
 
     String initialValue = record?.title ?? "";
     _typeAheadController.text = initialValue;
+
+    _repeatEditingController.addListener(() {
+      calculateEndDate();
+    });
+  }
+
+  void calculateEndDate() {
+    final n = int.tryParse(_repeatEditingController.text);
+    if (n != null && n > 0) {
+      //modified from recurrent-record-service.dart:75
+      void addTimeByPeriod(int periodValue, {bool isMonth = false}) {
+        // Store the original day, hour, minute, and second from the pattern's start date.
+        // This is crucial for maintaining consistency across DST changes and month-end rollovers.
+        final int originalStartDay = localDisplayDate!.day;
+        final int originalHour = localDisplayDate!.hour;
+        final int originalMinute = localDisplayDate!.minute;
+        final int originalSecond = localDisplayDate!.second;
+
+        // Now, calculate and add the subsequent records.
+        // Calculate the next date.
+        if (isMonth) {
+          // Get the target year and month after adding the period value.
+          int targetYear = localDisplayDate!.year;
+          int targetMonth = localDisplayDate!.month + periodValue * n;
+
+          if (targetMonth > 12) {
+            targetYear += (targetMonth - 1) ~/ 12;
+            targetMonth = (targetMonth - 1) % 12 + 1;
+          }
+
+          // Create a candidate date using the original start day.
+          DateTime candidateDate = DateTime(
+            targetYear,
+            targetMonth,
+            originalStartDay,
+            originalHour,
+            originalMinute,
+            originalSecond,
+          );
+
+          // Explicitly check for a month rollover. If the original day was invalid
+          // (e.g., day 30 in February), the new date will be in the next month.
+          if (candidateDate.month != targetMonth) {
+            // If a rollover occurred, set the date to the last day of the target month.
+            localDisplayEndDate = DateTime(
+              targetYear,
+              targetMonth + 1,
+              0,
+              originalHour,
+              originalMinute,
+              originalSecond,
+            );
+          } else {
+            // Otherwise, the candidate date is correct.
+            localDisplayEndDate = candidateDate;
+          }
+        } else {
+          // Logic for non-monthly recurrence, manually incrementing the calendar day
+          // to avoid time drift issues caused by Daylight Saving Time (DST) changes.
+          localDisplayEndDate = DateTime(
+            localDisplayDate!.year,
+            localDisplayDate!.month,
+            localDisplayDate!.day + periodValue * n,
+            originalHour,
+            originalMinute,
+            originalSecond,
+          );
+        }
+
+        // Check if the newly calculated date is within the bounds.
+      }
+
+      // localDisplayEndDate = localDisplayDate.add(Duration(months: 1));
+      switch (recurrentPeriod) {
+        case RecurrentPeriod.EveryDay:
+          addTimeByPeriod(1);
+          break;
+        case RecurrentPeriod.EveryWeek:
+          addTimeByPeriod(7);
+          break;
+        case RecurrentPeriod.EveryTwoWeeks:
+          addTimeByPeriod(14);
+          break;
+        case RecurrentPeriod.EveryFourWeeks:
+          addTimeByPeriod(28);
+          break;
+        case RecurrentPeriod.EveryMonth:
+          addTimeByPeriod(1, isMonth: true);
+          break;
+        case RecurrentPeriod.EveryThreeMonths:
+          addTimeByPeriod(3, isMonth: true);
+          break;
+        case RecurrentPeriod.EveryFourMonths:
+          addTimeByPeriod(4, isMonth: true);
+          break;
+        case RecurrentPeriod.EveryYear:
+          addTimeByPeriod(12, isMonth: true);
+          break;
+        case RecurrentPeriod.Custom:
+          addTimeByPeriod(_customIntervalValue!, isMonth: true);
+          break;
+        default:
+          break;
+      }
+    }
   }
 
   @override
   void dispose() {
     _amountExpressionResolver.dispose();
     _textEditingController.dispose();
+    _repeatEditingController.dispose();
     _receivedAmountController.dispose();
     _typeAheadController.dispose();
     super.dispose();
@@ -830,125 +937,163 @@ class EditRecordPageState extends State<EditRecordPage> {
                                                 color: Theme.of(context)
                                                     .colorScheme
                                                     .onSurfaceVariant),
-                                          ),
-                                        );
-                                      }).toList(),
-                                      onChanged: canChangeRepeat
-                                          ? (value) async {
-                                              if (value == null) return;
-                                              if (value ==
+                                            ),
+                                          );
+                                        }).toList(),
+                                    onChanged: canChangeRepeat
+                                        ? (value) async {
+                                            if (value == null) return;
+                                            if (value ==
                                                   RecurrentPeriod
                                                       .Custom.index) {
-                                                // Open a dialog rather than
-                                                // committing to Custom
-                                                // immediately: this keeps
-                                                // recurrentPeriod/Index
-                                                // untouched (so the dropdown
-                                                // stays on its previous
-                                                // selection) unless the user
-                                                // explicitly confirms a valid
-                                                // interval. Dismissing via
-                                                // the barrier, back button, or
-                                                // Cancel all resolve to null.
+                                              // Open a dialog rather than
+                                              // committing to Custom
+                                              // immediately: this keeps
+                                              // recurrentPeriod/Index
+                                              // untouched (so the dropdown
+                                              // stays on its previous
+                                              // selection) unless the user
+                                              // explicitly confirms a valid
+                                              // interval. Dismissing via
+                                              // the barrier, back button, or
+                                              // Cancel all resolve to null.
                                                 final result = await showDialog<
                                                     CustomIntervalSelection>(
-                                                  context: context,
-                                                  builder: (context) =>
-                                                      CustomIntervalDialog(
-                                                    initialValue:
-                                                        _customIntervalValue,
-                                                    initialUnit:
-                                                        _customIntervalUnit,
-                                                  ),
-                                                );
-                                                if (result == null) return;
-                                                setState(() {
-                                                  recurrentPeriodIndex = value;
-                                                  recurrentPeriod =
-                                                      RecurrentPeriod.Custom;
-                                                  _customIntervalValue =
-                                                      result.value;
-                                                  _customIntervalUnit =
-                                                      result.unit;
-                                                });
-                                              } else {
-                                                setState(() {
-                                                  recurrentPeriodIndex = value;
-                                                  recurrentPeriod =
-                                                      RecurrentPeriod
-                                                          .values[value];
-                                                });
-                                              }
+                                                    context: context,
+                                                    builder: (context) =>
+                                                        CustomIntervalDialog(
+                                                          initialValue:
+                                                              _customIntervalValue,
+                                                          initialUnit:
+                                                              _customIntervalUnit,
+                                                        ),
+                                                  );
+                                              if (result == null) return;
+                                              setState(() {
+                                                recurrentPeriodIndex = value;
+                                                recurrentPeriod =
+                                                    RecurrentPeriod.Custom;
+                                                _customIntervalValue =
+                                                    result.value;
+                                                _customIntervalUnit =
+                                                    result.unit;
+                                              });
+                                            } else {
+                                              setState(() {
+                                                recurrentPeriodIndex = value;
+                                                recurrentPeriod =
+                                                    RecurrentPeriod
+                                                        .values[value];
+                                              });
                                             }
-                                          : null,
-                                      onTap: () {
-                                        FocusScope.of(context).unfocus();
-                                        dismissInAppKeyboard();
-                                      },
-                                      value: recurrentPeriodIndex,
-                                      underline: SizedBox(),
-                                      isExpanded: true,
-                                      hint: Text(
-                                        "Not repeat".i18n,
-                                        style: TextStyle(
-                                            fontSize: 18,
-                                            color: Theme.of(context)
-                                                .colorScheme
+                                            calculateEndDate();
+                                          }
+                                        : null,
+                                    onTap: () {
+                                      FocusScope.of(context).unfocus();
+                                      dismissInAppKeyboard();
+                                    },
+                                    value: recurrentPeriodIndex,
+                                    underline: SizedBox(),
+                                    isExpanded: true,
+                                    hint: Text(
+                                      "Not repeat".i18n,
+                                      style: TextStyle(
+                                        fontSize: 18,
+                                        color: Theme.of(context)
+                                            .colorScheme
                                                 .onSurfaceVariant),
                                       ),
                                     )),
-                                    Visibility(
-                                      child: getProLabel(labelFontSize: 12.0),
-                                      visible: showProLabel,
-                                    ),
-                                    Visibility(
-                                      child: IconButton(
-                                        icon: Icon(Icons.close,
-                                            size: 28,
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .onSurface),
-                                        onPressed: () {
-                                          setState(() {
-                                            recurrentPeriod = null;
-                                            recurrentPeriodIndex = null;
-                                            _customIntervalValue = null;
-                                            _customIntervalUnit = null;
-                                          });
-                                        },
-                                      ),
-                                      visible: showClearRepeat,
-                                    )
-                                  ],
+                                Visibility(
+                                  child: getProLabel(labelFontSize: 12.0),
+                                  visible: showProLabel,
                                 ),
-                              ),
+                                Visibility(
+                                  child: IconButton(
+                                        icon: Icon(Icons.close,
+                                      size: 28,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                                .onSurface),
+                                    onPressed: () {
+                                      setState(() {
+                                        recurrentPeriod = null;
+                                        recurrentPeriodIndex = null;
+                                        _customIntervalValue = null;
+                                        _customIntervalUnit = null;
+                                      });
+                                    },
+                                  ),
+                                  visible: showClearRepeat,
+                                    )
+                              ],
+                            ),
+                          ),
                             )
-                          ],
+                      ],
                         ))),
+                    ),
+              // End Date Picker - visible when recurrent period is selected and end date is set
+              Visibility(
+                visible: showEndDateRow,
+                child: Column(
+                  children: [
+                    Divider(indent: 75, thickness: 1),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 40,
+                            child: Center(
+                              child: Icon(
+                                Icons.repeat_one,
+                                size: 28,
+                                color: Theme.of(context).colorScheme.onSurface,
+                              ),
+                            ),
+                          ),
+                          SizedBox(width: 20),
+                          Expanded(
+                            child: TextFormField(
+                              controller: _repeatEditingController,
+                              enabled: canChangeEndDate,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.digitsOnly,
+                              ],
+                              decoration: InputDecoration(
+                                labelText: "Repeat".i18n,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
               // End Date Picker - visible when recurrent period is selected and end date is set
               Visibility(
                 visible: showEndDateRow,
                 child: Column(
                   children: [
-                    Divider(
-                      indent: 75,
-                      thickness: 1,
-                    ),
+                    Divider(indent: 75, thickness: 1),
                     Semantics(
                       identifier: 'end-date-field',
                       child: InkWell(
-                          onTap: canChangeEndDate
-                              ? () async {
-                                  FocusScope.of(context).unfocus();
-                                  dismissInAppKeyboard();
-                                  // Default to 30 days from now (not 1 year, which is confusing)
+                        onTap: canChangeEndDate
+                            ? () async {
+                                FocusScope.of(context).unfocus();
+                                dismissInAppKeyboard();
+                                // Default to 30 days from now (not 1 year, which is confusing)
                                   DateTime initialDate = localDisplayEndDate ??
-                                      DateTime.now().add(Duration(days: 30));
-                                  int firstDayOfWeek = getFirstDayOfWeekIndex();
-                                  DateTime? result = await showDatePicker(
-                                      context: context,
-                                      initialDate: initialDate,
+                                    DateTime.now().add(Duration(days: 30));
+                                int firstDayOfWeek = getFirstDayOfWeekIndex();
+                                DateTime? result = await showDatePicker(
+                                  context: context,
+                                  initialDate: initialDate,
                                       firstDate:
                                           localDisplayDate ?? DateTime(1970),
                                       lastDate: DateTime.now()
@@ -959,93 +1104,93 @@ class EditRecordPageState extends State<EditRecordPage> {
                                             .buildDatePickerWithFirstDayOfWeek(
                                                 context, child, firstDayOfWeek);
                                       });
-                                  if (result != null) {
-                                    setState(() {
-                                      localDisplayEndDate = result;
-                                    });
-                                  }
+                                if (result != null) {
+                                  setState(() {
+                                    localDisplayEndDate = result;
+                                  });
                                 }
-                              : null,
-                          child: Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
-                              child: Row(
-                                children: [
-                                  SizedBox(
-                                    width: 40,
-                                    child: Center(
-                                      child: Icon(
-                                        Icons.event_busy,
-                                        size: 28,
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .onSurfaceVariant,
-                                      ),
-                                    ),
+                              }
+                            : null,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
+                          child: Row(
+                            children: [
+                              SizedBox(
+                                width: 40,
+                                child: Center(
+                                  child: Icon(
+                                    Icons.event_busy,
+                                    size: 28,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
                                   ),
-                                  Expanded(
-                                    child: Container(
+                                ),
+                              ),
+                              Expanded(
+                                child: Container(
                                       margin:
                                           EdgeInsets.only(left: 20, right: 10),
-                                      child: Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  "End Date (optional)".i18n,
-                                                  style: TextStyle(
-                                                    fontSize: 12,
-                                                    color: Theme.of(context)
-                                                        .colorScheme
-                                                        .onSurfaceVariant
-                                                        .withValues(alpha: 0.7),
-                                                  ),
-                                                ),
-                                                SizedBox(height: 4),
-                                                Text(
-                                                  localDisplayEndDate != null
-                                                      ? getDateStr(
+                                  child: Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              "End Date (optional)".i18n,
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .onSurfaceVariant
+                                                    .withValues(alpha: 0.7),
+                                              ),
+                                            ),
+                                            SizedBox(height: 4),
+                                            Text(
+                                              localDisplayEndDate != null
+                                                  ? getDateStr(
                                                           localDisplayEndDate!)
-                                                      : "Not set".i18n,
-                                                  style: TextStyle(
-                                                    fontSize: 18,
+                                                  : "Not set".i18n,
+                                              style: TextStyle(
+                                                fontSize: 18,
                                                     color: localDisplayEndDate !=
                                                             null
-                                                        ? Theme.of(context)
-                                                            .colorScheme
-                                                            .onSurface
-                                                        : Theme.of(context)
-                                                            .colorScheme
-                                                            .onSurfaceVariant,
-                                                  ),
-                                                ),
-                                              ],
+                                                    ? Theme.of(context)
+                                                          .colorScheme
+                                                          .onSurface
+                                                    : Theme.of(context)
+                                                          .colorScheme
+                                                          .onSurfaceVariant,
+                                              ),
                                             ),
-                                          ),
-                                          Visibility(
-                                            child: IconButton(
-                                              icon: Icon(Icons.close,
-                                                  size: 28,
-                                                  color: Theme.of(context)
-                                                      .colorScheme
-                                                      .onSurface),
-                                              onPressed: () {
-                                                setState(() {
-                                                  localDisplayEndDate = null;
-                                                });
-                                              },
-                                            ),
-                                            visible: showClearEndDate,
-                                          ),
-                                        ],
+                                          ],
+                                        ),
                                       ),
-                                    ),
+                                      Visibility(
+                                        child: IconButton(
+                                              icon: Icon(Icons.close,
+                                            size: 28,
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                      .onSurface),
+                                          onPressed: () {
+                                            setState(() {
+                                              localDisplayEndDate = null;
+                                            });
+                                          },
+                                        ),
+                                        visible: showClearEndDate,
+                                      ),
+                                    ],
                                   ),
-                                ],
+                                ),
+                              ),
+                            ],
                               ))),
                     ),
                   ],
@@ -1380,7 +1525,7 @@ class EditRecordPageState extends State<EditRecordPage> {
           _originalValue != null && record!.value != _originalValue;
       final receivedAmountChanged =
           (record!.transferValue ?? record!.value?.abs()) !=
-              (_originalTransferValue ?? _originalValue?.abs());
+          (_originalTransferValue ?? _originalValue?.abs());
       if (dateChanged || amountChanged || receivedAmountChanged) {
         record!.recurrencePatternId = null;
       }
@@ -1445,9 +1590,9 @@ class EditRecordPageState extends State<EditRecordPage> {
         _totalWalletCount = activeWallets.isEmpty
             ? 0
             : visibleWallets.isEmpty
-                ? activeWallets.length
-                : visibleWallets.length +
-                    (walletToSelect?.isHidden == true ? 1 : 0);
+            ? activeWallets.length
+            : visibleWallets.length +
+                  (walletToSelect?.isHidden == true ? 1 : 0);
       });
     }
 
@@ -1496,10 +1641,10 @@ class EditRecordPageState extends State<EditRecordPage> {
     // without the RecurrentPeriod enum value itself changing.
     bool customIntervalHasChanged =
         toSet.recurrentPeriod == RecurrentPeriod.Custom &&
-            (toSet.customIntervalValue !=
-                    passedRecurrentRecordPattern!.customIntervalValue ||
-                toSet.customIntervalUnit !=
-                    passedRecurrentRecordPattern!.customIntervalUnit);
+        (toSet.customIntervalValue !=
+                passedRecurrentRecordPattern!.customIntervalValue ||
+            toSet.customIntervalUnit !=
+                passedRecurrentRecordPattern!.customIntervalUnit);
     // Compare the UTC timestamps
     bool startingDateHasChanged = toSet.utcDateTime.millisecondsSinceEpoch !=
         passedRecurrentRecordPattern!.utcDateTime.millisecondsSinceEpoch;
@@ -1598,68 +1743,68 @@ class EditRecordPageState extends State<EditRecordPage> {
     final bgColor = Theme.of(context).colorScheme.secondaryContainer;
     final fgColor = Theme.of(context).colorScheme.onSecondaryContainer;
     return AppBar(
-        backgroundColor: bgColor,
-        foregroundColor: fgColor,
-        leading: BackButton(onPressed: () => Navigator.pop(context)),
+      backgroundColor: bgColor,
+      foregroundColor: fgColor,
+      leading: BackButton(onPressed: () => Navigator.pop(context)),
         title: Text(
           readOnly ? 'View record'.i18n : 'Edit record'.i18n,
         ),
-        actions: <Widget>[
-          Visibility(
+      actions: <Widget>[
+        Visibility(
               visible: (widget.passedRecord != null ||
-                      widget.passedRecurrentRecordPattern != null) &&
-                  !readOnly,
-              child: IconButton(
-                  icon: Semantics(
-                      identifier: "delete-button",
+                  widget.passedRecurrentRecordPattern != null) &&
+              !readOnly,
+          child: IconButton(
+            icon: Semantics(
+              identifier: "delete-button",
                       child: const Icon(Icons.delete)),
-                  tooltip: 'Delete'.i18n,
-                  onPressed: () async {
+            tooltip: 'Delete'.i18n,
+            onPressed: () async {
                     AlertDialogBuilder deleteDialog =
                         AlertDialogBuilder("Critical action".i18n)
                             .addTrueButtonName("Yes".i18n)
                             .addFalseButtonName("No".i18n);
-                    if (widget.passedRecord != null) {
-                      deleteDialog = deleteDialog.addSubtitle(
+              if (widget.passedRecord != null) {
+                deleteDialog = deleteDialog.addSubtitle(
                           "Do you really want to delete this record?".i18n);
-                    } else {
-                      deleteDialog = deleteDialog.addSubtitle(
+              } else {
+                deleteDialog = deleteDialog.addSubtitle(
                           "Do you really want to delete this recurrent record?"
                               .i18n);
-                    }
-                    var continueDelete = await showDialog(
-                        context: context,
-                        builder: (BuildContext context) {
-                          return deleteDialog.build(context);
+              }
+              var continueDelete = await showDialog(
+                context: context,
+                builder: (BuildContext context) {
+                  return deleteDialog.build(context);
                         });
-                    if (continueDelete) {
-                      if (widget.passedRecord != null) {
-                        await database.deleteRecordById(record!.id);
+              if (continueDelete) {
+                if (widget.passedRecord != null) {
+                  await database.deleteRecordById(record!.id);
                         final restoreAmount =
                             PreferencesUtils.getOrDefault<bool>(
-                                ServiceConfig.sharedPreferences!,
+                    ServiceConfig.sharedPreferences!,
                                 PreferencesKeys.restoreAmountOnDelete)!;
-                        if (!restoreAmount &&
-                            record!.walletId != null &&
-                            record!.value != null) {
+                  if (!restoreAmount &&
+                      record!.walletId != null &&
+                      record!.value != null) {
                           final wallet =
                               await database.getWalletById(record!.walletId!);
-                          if (wallet != null) {
-                            wallet.initialAmount += record!.value!;
-                            await database.updateWallet(wallet.id!, wallet);
-                          }
-                        }
-                      } else {
+                    if (wallet != null) {
+                      wallet.initialAmount += record!.value!;
+                      await database.updateWallet(wallet.id!, wallet);
+                    }
+                  }
+                } else {
                         String patternId =
                             widget.passedRecurrentRecordPattern!.id!;
-                        // Use the current UTC time when deleting future records
-                        await database.deleteFutureRecordsByPatternId(
+                  // Use the current UTC time when deleting future records
+                  await database.deleteFutureRecordsByPatternId(
                             patternId, DateTime.now().toUtc());
                         await database
                             .deleteRecurrentRecordPatternById(patternId);
-                      }
-                      Navigator.pop(context);
-                    }
+                }
+                Navigator.pop(context);
+              }
                   })),
         ]);
   }
@@ -1670,22 +1815,22 @@ class EditRecordPageState extends State<EditRecordPage> {
       child: Form(
         key: _formKey,
         child: Column(children: [
-          _createAmountCard(),
-          Divider(height: 1),
-          _createTitleCard(),
-          Divider(height: 1),
-          _createCategoryCard(),
-          Divider(height: 1),
-          if (ServiceConfig.walletsEnabled) ...[
-            _createWalletCard(),
-            _createReceivedAmountCard(),
+            _createAmountCard(),
             Divider(height: 1),
-          ],
-          _createDateAndRepeatCard(),
-          Divider(height: 1),
-          _createTagsSection(),
-          Divider(height: 1),
-          _createAddNoteCard(),
+            _createTitleCard(),
+            Divider(height: 1),
+            _createCategoryCard(),
+            Divider(height: 1),
+            if (ServiceConfig.walletsEnabled) ...[
+              _createWalletCard(),
+              _createReceivedAmountCard(),
+              Divider(height: 1),
+            ],
+            _createDateAndRepeatCard(),
+            Divider(height: 1),
+            _createTagsSection(),
+            Divider(height: 1),
+            _createAddNoteCard(),
         ]),
       ),
     );
