@@ -2,6 +2,7 @@
 
 import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_typeahead/flutter_typeahead.dart';
 import 'package:piggybank/categories/categories-tab-page-view.dart';
 import 'package:piggybank/components/tag_chip.dart';
@@ -1061,7 +1062,7 @@ class EditRecordPageState extends State<EditRecordPage> {
                               enabled: canChangeEndDate,
                               keyboardType: TextInputType.number,
                               inputFormatters: [
-                                FilteringTextInputFormatter.digitsOnly,
+                                FilteringTextInputFormatter.digitsOnly
                               ],
                               decoration: InputDecoration(
                                 labelText: "Repeat".i18n,
