@@ -97,6 +97,8 @@ class EditRecordPageState extends State<EditRecordPage> {
   DateTime? localDisplayDate;
   DateTime? localDisplayEndDate;
 
+  int? repeatAmount;
+
   Set<String> _selectedTags = {};
   Set<String> _suggestedTags = {};
 
@@ -297,49 +299,46 @@ class EditRecordPageState extends State<EditRecordPage> {
     String initialValue = record?.title ?? "";
     _typeAheadController.text = initialValue;
 
-    _repeatEditingController.addListener(() {
-      calculateEndDate();
-    });
   }
 
   void calculateEndDate() {
-    final n = int.tryParse(_repeatEditingController.text);
-    if (n != null && n > 0) {
-      //modified from recurrent-record-service.dart:75
-      void addTimeByPeriod(int periodValue, {bool isMonth = false}) {
-        // Store the original day, hour, minute, and second from the pattern's start date.
-        // This is crucial for maintaining consistency across DST changes and month-end rollovers.
-        final int originalStartDay = localDisplayDate!.day;
-        final int originalHour = localDisplayDate!.hour;
-        final int originalMinute = localDisplayDate!.minute;
-        final int originalSecond = localDisplayDate!.second;
+    if(repeatAmount == null) return;
+    //modified from recurrent-record-service.dart:75
+    void addTimeByPeriod(int periodValue, {bool isMonth = false}) {
+      // Store the original day, hour, minute, and second from the pattern's start date.
+      // This is crucial for maintaining consistency across DST changes and month-end rollovers.
+      final int originalStartDay = localDisplayDate!.day;
+      final int originalHour = localDisplayDate!.hour;
+      final int originalMinute = localDisplayDate!.minute;
+      final int originalSecond = localDisplayDate!.second;
 
-        // Now, calculate and add the subsequent records.
-        // Calculate the next date.
-        if (isMonth) {
-          // Get the target year and month after adding the period value.
-          int targetYear = localDisplayDate!.year;
-          int targetMonth = localDisplayDate!.month + periodValue * n;
+      // Now, calculate and add the subsequent records.
+      // Calculate the next date.
+      if (isMonth) {
+        // Get the target year and month after adding the period value.
+        int targetYear = localDisplayDate!.year;
+        int targetMonth = localDisplayDate!.month + periodValue * repeatAmount!;
 
-          if (targetMonth > 12) {
-            targetYear += (targetMonth - 1) ~/ 12;
-            targetMonth = (targetMonth - 1) % 12 + 1;
-          }
+        if (targetMonth > 12) {
+          targetYear += (targetMonth - 1) ~/ 12;
+          targetMonth = (targetMonth - 1) % 12 + 1;
+        }
 
-          // Create a candidate date using the original start day.
-          DateTime candidateDate = DateTime(
-            targetYear,
-            targetMonth,
-            originalStartDay,
-            originalHour,
-            originalMinute,
-            originalSecond,
-          );
+        // Create a candidate date using the original start day.
+        DateTime candidateDate = DateTime(
+          targetYear,
+          targetMonth,
+          originalStartDay,
+          originalHour,
+          originalMinute,
+          originalSecond,
+        );
 
-          // Explicitly check for a month rollover. If the original day was invalid
-          // (e.g., day 30 in February), the new date will be in the next month.
-          if (candidateDate.month != targetMonth) {
-            // If a rollover occurred, set the date to the last day of the target month.
+        // Explicitly check for a month rollover. If the original day was invalid
+        // (e.g., day 30 in February), the new date will be in the next month.
+        if (candidateDate.month != targetMonth) {
+          // If a rollover occurred, set the date to the last day of the target month.
+          setState(() {
             localDisplayEndDate = DateTime(
               targetYear,
               targetMonth + 1,
@@ -348,58 +347,62 @@ class EditRecordPageState extends State<EditRecordPage> {
               originalMinute,
               originalSecond,
             );
-          } else {
-            // Otherwise, the candidate date is correct.
-            localDisplayEndDate = candidateDate;
-          }
+          });
         } else {
-          // Logic for non-monthly recurrence, manually incrementing the calendar day
-          // to avoid time drift issues caused by Daylight Saving Time (DST) changes.
+          // Otherwise, the candidate date is correct.
+          setState(() {
+            localDisplayEndDate = candidateDate;
+          });
+        }
+      } else {
+        // Logic for non-monthly recurrence, manually incrementing the calendar day
+        // to avoid time drift issues caused by Daylight Saving Time (DST) changes.
+        setState(() {
           localDisplayEndDate = DateTime(
             localDisplayDate!.year,
             localDisplayDate!.month,
-            localDisplayDate!.day + periodValue * n,
+            localDisplayDate!.day + periodValue * repeatAmount!,
             originalHour,
             originalMinute,
             originalSecond,
           );
-        }
-
-        // Check if the newly calculated date is within the bounds.
+        });
       }
 
-      // localDisplayEndDate = localDisplayDate.add(Duration(months: 1));
-      switch (recurrentPeriod) {
-        case RecurrentPeriod.EveryDay:
-          addTimeByPeriod(1);
-          break;
-        case RecurrentPeriod.EveryWeek:
-          addTimeByPeriod(7);
-          break;
-        case RecurrentPeriod.EveryTwoWeeks:
-          addTimeByPeriod(14);
-          break;
-        case RecurrentPeriod.EveryFourWeeks:
-          addTimeByPeriod(28);
-          break;
-        case RecurrentPeriod.EveryMonth:
-          addTimeByPeriod(1, isMonth: true);
-          break;
-        case RecurrentPeriod.EveryThreeMonths:
-          addTimeByPeriod(3, isMonth: true);
-          break;
-        case RecurrentPeriod.EveryFourMonths:
-          addTimeByPeriod(4, isMonth: true);
-          break;
-        case RecurrentPeriod.EveryYear:
-          addTimeByPeriod(12, isMonth: true);
-          break;
-        case RecurrentPeriod.Custom:
-          addTimeByPeriod(_customIntervalValue!, isMonth: true);
-          break;
-        default:
-          break;
-      }
+      // Check if the newly calculated date is within the bounds.
+    }
+
+    // localDisplayEndDate = localDisplayDate.add(Duration(months: 1));
+    switch (recurrentPeriod) {
+      case RecurrentPeriod.EveryDay:
+        addTimeByPeriod(1);
+        break;
+      case RecurrentPeriod.EveryWeek:
+        addTimeByPeriod(7);
+        break;
+      case RecurrentPeriod.EveryTwoWeeks:
+        addTimeByPeriod(14);
+        break;
+      case RecurrentPeriod.EveryFourWeeks:
+        addTimeByPeriod(28);
+        break;
+      case RecurrentPeriod.EveryMonth:
+        addTimeByPeriod(1, isMonth: true);
+        break;
+      case RecurrentPeriod.EveryThreeMonths:
+        addTimeByPeriod(3, isMonth: true);
+        break;
+      case RecurrentPeriod.EveryFourMonths:
+        addTimeByPeriod(4, isMonth: true);
+        break;
+      case RecurrentPeriod.EveryYear:
+        addTimeByPeriod(12, isMonth: true);
+        break;
+      case RecurrentPeriod.Custom:
+        addTimeByPeriod(_customIntervalValue!, isMonth: true);
+        break;
+      default:
+        break;
     }
   }
 
@@ -1059,6 +1062,13 @@ class EditRecordPageState extends State<EditRecordPage> {
                           Expanded(
                             child: TextFormField(
                               controller: _repeatEditingController,
+                              onChanged: (value) => {setState(() {
+                                try {
+                                  repeatAmount = int.parse(value);
+                                } catch (e) {
+                                  repeatAmount = null;
+                                } ;
+                              }), calculateEndDate()},
                               enabled: canChangeEndDate,
                               keyboardType: TextInputType.number,
                               inputFormatters: [
